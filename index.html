@@ -102,6 +102,21 @@ main { max-width:760px; width:100%; margin:0 auto; flex:1; display:flex; flex-di
 
 .progress { text-align:center; font-size:0.85rem; color:var(--muted); margin-bottom:0.5rem; }
 .progress b { color:var(--ink); }
+.rp-wrap { margin-bottom:0.5rem; }
+.rp-labels { display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--muted); margin-bottom:0.3rem; }
+.rp-labels b { color:var(--ink); }
+.rp-pct { font-weight:600; color:var(--accent); font-size:0.78rem; }
+.rp-bar { height:8px; border-radius:999px; background:#e4ebe1; overflow:hidden; }
+.rp-fill { height:100%; width:0%; background:var(--accent); border-radius:999px; transition:width .35s ease; }
+.code-stats { background:var(--bg2); border:1px solid var(--rule); border-radius:10px; padding:0.6rem 0.8rem; margin-bottom:0.8rem; font-size:0.8rem; color:var(--muted); }
+.cs-row { display:flex; align-items:center; gap:0.35rem; }
+.cs-row b { color:var(--accent); font-size:0.95rem; }
+.cs-pct { font-weight:600; color:var(--accent); margin-left:auto; }
+.cs-bar { height:6px; border-radius:999px; background:#e4ebe1; overflow:hidden; margin:0.4rem 0; }
+.cs-fill { height:100%; width:0%; background:var(--accent); border-radius:999px; transition:width .3s; }
+.cs-row2 { display:flex; justify-content:space-between; font-size:0.75rem; }
+.cs-row2 b { color:var(--ink); }
+.cs-ts { margin-top:0.3rem; font-size:0.72rem; }
 .hidden { display:none !important; }
 .empty { text-align:center; color:var(--muted); padding:3rem 1rem; }
 .help { text-align:center; font-size:0.75rem; color:var(--muted); margin-top:0.3rem; }
@@ -171,13 +186,13 @@ main { max-width:760px; width:100%; margin:0 auto; flex:1; display:flex; flex-di
     <span class="dir-group">
       <button class="dir-btn" data-dir="zh2en">中 → 英</button>
       <button class="dir-btn" data-dir="en2zh">英 → 中</button>
-      <button class="dir-btn" data-dir="mixed">随机</button>
     </span>
     <span style="width:0.8rem"></span>
     <span>模式：</span>
     <button class="mode-btn" data-mode="seq">顺序</button>
     <button class="mode-btn" data-mode="rand">随机</button>
     <button class="mode-btn" data-mode="review">只复习没记住</button>
+    <button class="mode-btn" data-mode="unseen">只看未复习</button>
     <span style="flex:1"></span>
     <button class="mode-btn" id="btnCode">进度码</button>
     <button class="mode-btn" id="btnReset">重置进度</button>
@@ -198,12 +213,26 @@ main { max-width:760px; width:100%; margin:0 auto; flex:1; display:flex; flex-di
     <button id="btnAgain">✘ 没记住</button>
     <button id="btnKnown">✔ 记住了</button>
   </div>
+  <div class="rp-wrap">
+    <div class="rp-labels">
+      <span><b id="rpScope">全部</b> · 已复习 <b id="rpReviewed">0</b> / <span id="rpTotal">0</span></span>
+      <span class="rp-pct" id="rpPct">0%</span>
+      <span>未复习 <b id="rpUnseen">0</b></span>
+    </div>
+    <div class="rp-bar"><div class="rp-fill" id="rpFill"></div></div>
+  </div>
   <div class="progress" id="progress"></div>
   <div class="help">快捷键：空格 = 翻面 ｜ ← = 没记住 ｜ → = 记住了</div>
 </main>
 <div id="codeModal" class="code-modal hidden">
   <div class="code-box">
     <h3 id="codeTitle">进度码</h3>
+    <div class="code-stats hidden" id="codeStats">
+      <div class="cs-row"><span>已复习</span><b id="csReviewed">0</b><span>/ <span id="csTotal">0</span></span><span class="cs-pct" id="csPct">0%</span></div>
+      <div class="cs-bar"><div class="cs-fill" id="csFill"></div></div>
+      <div class="cs-row2"><span>记住 <b id="csKnown">0</b></span><span>待复习 <b id="csAgain">0</b></span><span>未复习 <b id="csUnseen">0</b></span></div>
+      <div class="cs-ts" id="csTs"></div>
+    </div>
     <textarea id="codeArea" spellcheck="false"></textarea>
     <div class="code-actions">
       <button class="cb-copy" id="codeCopy">复制</button>
@@ -333,6 +362,9 @@ function buildQueue() {
     var againSet = state.again;
     list = list.filter(function (c) { return againSet.has(c.id); });
   }
+  if (state.mode === 'unseen') {
+    list = list.filter(function (c) { return !state.known.has(c.id) && !state.again.has(c.id); });
+  }
   if (state.mode === 'rand') {
     list = list.slice().sort(function () { return Math.random() - 0.5; });
   }
@@ -340,10 +372,7 @@ function buildQueue() {
   state.idx = 0;
 }
 
-function dirOfCard(c) {
-  if (state.dir === 'mixed') {
-    return (c.id % 2 === 0) ? 'zh2en' : 'en2zh';
-  }
+function dirOfCard() {
   return state.dir;
 }
 
@@ -360,11 +389,13 @@ function render() {
   var progress = document.getElementById('progress');
 
   if (state.queue.length === 0) {
-    card.innerHTML = '<div class="empty">' + (state.mode === 'review' ? '没记住的卡片已清零，太棒了！' : '当前分类没有卡片') + '</div>';
+    var emptyMsg = state.mode === 'review' ? '没记住的卡片已清零，太棒了！' : (state.mode === 'unseen' ? '未复习的卡片已清零，全部过了一遍！' : '当前分类没有卡片');
+    card.innerHTML = '<div class="empty">' + emptyMsg + '</div>';
     catTag.textContent = ''; dirLabel.textContent = '';
     hint.classList.add('hidden');
     btnAgain.disabled = true; btnKnown.disabled = true;
     progress.textContent = '';
+    updateReviewBar();
     return;
   }
 
@@ -407,6 +438,25 @@ function render() {
   var knownCount = state.queue.filter(function (x) { return state.known.has(x.id); }).length;
   progress.innerHTML = '第 <b>' + (state.idx + 1) + '</b> / ' + state.queue.length + ' 张 ｜ 已掌握 <b>' + knownCount + '</b> ｜ 待复习 <b>' + state.again.size + '</b>';
   document.getElementById('cardCount').textContent = '共 ' + CARDS.length + ' 条 · ' + catName;
+  updateReviewBar();
+}
+
+function updateReviewBar() {
+  var list = CARDS;
+  if (state.cat !== 'all') list = list.filter(function (c) { return c.cat === parseInt(state.cat, 10); });
+  var total = list.length;
+  var reviewed = 0;
+  for (var i = 0; i < list.length; i++) {
+    if (state.known.has(list[i].id) || state.again.has(list[i].id)) reviewed++;
+  }
+  var unseen = total - reviewed;
+  var pct = total ? Math.round(reviewed / total * 100) : 0;
+  document.getElementById('rpScope').textContent = state.cat === 'all' ? '全部' : catNames[state.cat];
+  document.getElementById('rpReviewed').textContent = reviewed;
+  document.getElementById('rpTotal').textContent = total;
+  document.getElementById('rpUnseen').textContent = unseen;
+  document.getElementById('rpPct').textContent = pct + '%';
+  document.getElementById('rpFill').style.width = pct + '%';
 }
 
 function flip() {
@@ -465,17 +515,52 @@ document.getElementById('btnReset').addEventListener('click', function () {
   var btnCopy = document.getElementById('codeCopy');
   var btnPaste = document.getElementById('codePaste');
   var btnClose = document.getElementById('codeClose');
+  var statsBox = document.getElementById('codeStats');
 
+  function calcStats(kSize, aSize) {
+    var total = CARDS.length;
+    var reviewed = kSize + aSize;
+    return { total: total, reviewed: reviewed, unseen: total - reviewed, pct: total ? Math.round(reviewed / total * 100) : 0 };
+  }
+  function fmtTs(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function showStats(k, a, ts) {
+    var s = calcStats(k.size, a.size);
+    document.getElementById('csReviewed').textContent = s.reviewed;
+    document.getElementById('csTotal').textContent = s.total;
+    document.getElementById('csUnseen').textContent = s.unseen;
+    document.getElementById('csPct').textContent = s.pct + '%';
+    document.getElementById('csFill').style.width = s.pct + '%';
+    document.getElementById('csKnown').textContent = k.size;
+    document.getElementById('csAgain').textContent = a.size;
+    document.getElementById('csTs').textContent = ts ? '保存时间：' + fmtTs(ts) : '';
+    statsBox.classList.remove('hidden');
+  }
   function encodeProgress() {
-    return btoa(JSON.stringify({ k: Array.from(state.known), a: Array.from(state.again) }));
+    return btoa(JSON.stringify({
+      v: 2,
+      ts: Date.now(),
+      k: Array.from(state.known),
+      a: Array.from(state.again)
+    }));
   }
   function decodeProgress(str) {
     var p = JSON.parse(atob(str.trim()));
-    return { known: p.k || [], again: p.a || [] };
+    var k = Array.isArray(p.k) ? p.k : (Array.isArray(p.known) ? p.known : []);
+    var a = Array.isArray(p.a) ? p.a : (Array.isArray(p.again) ? p.again : []);
+    return { known: k, again: a, ts: p.ts || null };
+  }
+  function cleanIds(arr) {
+    return new Set(arr.map(Number).filter(function (x) { return !isNaN(x) && x >= 0; }));
   }
 
   btnCode.addEventListener('click', function() {
     area.value = encodeProgress();
+    showStats(state.known, state.again, Date.now());
     modal.classList.remove('hidden');
   });
   btnCopy.addEventListener('click', function() {
@@ -487,10 +572,16 @@ document.getElementById('btnReset').addEventListener('click', function () {
     if (!code) { alert('请先粘贴进度码'); return; }
     try {
       var p = decodeProgress(code);
-      state.known = new Set(p.known);
-      state.again = new Set(p.again);
+      var k = cleanIds(p.known);
+      var a = cleanIds(p.again);
+      var curS = calcStats(state.known.size, state.again.size);
+      var newS = calcStats(k.size, a.size);
+      showStats(k, a, p.ts);
+      if (!confirm('将恢复为：已复习 ' + newS.reviewed + ' / ' + newS.total + '（' + newS.pct + '%），记住 ' + k.size + '，待复习 ' + a.size + '，未复习 ' + newS.unseen + '。\n当前进度：已复习 ' + curS.reviewed + ' / ' + curS.total + '（' + curS.pct + '%）。\n确定覆盖当前进度吗？')) return;
+      state.known = k;
+      state.again = a;
       saveProgress(); buildQueue(); render();
-      alert('恢复成功：已记住 ' + state.known.size + ' 条，待复习 ' + state.again.size + ' 条');
+      alert('恢复成功：已复习 ' + newS.reviewed + ' 张（' + newS.pct + '%），未复习 ' + newS.unseen + ' 张；记住 ' + k.size + ' 张，待复习 ' + a.size + ' 张');
       modal.classList.add('hidden');
     } catch(e) { alert('进度码格式不正确'); }
   });
@@ -506,6 +597,8 @@ document.addEventListener('keydown', function (e) {
 
 loadProgress();
 renderChips();
+document.querySelector('.dir-btn[data-dir="' + state.dir + '"]').classList.add('active');
+document.querySelector('.mode-btn[data-mode="' + state.mode + '"]').classList.add('active');
 buildQueue();
 render();
 </script>
